@@ -8,10 +8,14 @@ using Newtonsoft.Json.Linq;
 
 public class CPHInline
 {
+    private const string TWITCH = "twitch";
+    private const string YOUTUBE = "youtube";
+    private const string TROVO = "trovo";
+    private static readonly HashSet<string> _platforms = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { TWITCH, YOUTUBE, TROVO };
+
     private static readonly string INPUT_0 = "input0";
     private static readonly string INPUT_1 = "input1";
     private static readonly string POINTS_VARIABLE_NAME = "points";
-    private static readonly HashSet<string> _platforms = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "twitch", "youtube", "trovo" };
     //private static long CHAT_INCREMENT_POINTS = 5; // CHANGE THIS TO SET THE AMOUNT OF POINTS ADDED PER CHAT MESSAGE
     private static long DEFAULT_POINTS_PER_TICK = 10; // CHANGE THIS TO SET THE AMOUNT OF POINTS ADDED PER PRESENT VIEWER SWEEP
     private static long SMASH_REDEEM_COST = 50; // CHANGE THIS TO SET THE COST OF REDEEMING A SMASH
@@ -60,6 +64,37 @@ public class CPHInline
         return true;
     }
 
+    private long? GetUserPoints(string platform, string userId)
+    {
+        switch (platform)
+        {
+            case TWITCH:
+                return GetTwitchUserPointsById(userId);
+            case YOUTUBE:
+                return GetYouTubeUserPointsById(userId);
+            case TROVO:
+                return GetTrovoUserPointsById(userId);
+            default:
+                return null;
+        }
+    }
+
+    private void SetUserPoints(string platform, string userId, long points)
+    {
+        switch (platform)
+        {
+            case TWITCH:
+                SetTwitchUserPointsById(userId, points);
+                break;
+            case YOUTUBE:
+                SetYouTubeUserPointsById(userId, points);
+                break;
+            case TROVO:
+                SetTrovoUserPointsById(userId, points);
+                break;
+        }
+    }
+
     public bool GetUserPoints()
     {
         if (!CPH.TryGetArg("userId", out string userId))
@@ -73,7 +108,7 @@ public class CPHInline
             return false;
         }
 
-        long? userPoints = GetUserPoints(userId, platform);
+        long? userPoints = GetUserPoints(platform, userId);
         if (userPoints == null)
         {
             return false;
@@ -89,34 +124,35 @@ public class CPHInline
             bot = true;
         }
 
-        return SendPlatformMessage(platform, $"{userName}, you have {userPoints} points", bot);
+        return SendPlatformMessage(platform, $"{userName}, you have {userPoints} points!  Use !commands to see how to spend them!", bot);
     }
 
     public bool SetPoints()
     {
         if (!CPH.TryGetArg(INPUT_0, out long points))
-    	  {
-    		    return false;
-    	  }
+    	{
+    	    return false;
+    	}
 
-        return SetPoints(points, GetPlatformTriggeringAction());
-    }
-
-    private bool SetPoints(long points, string platform)
-    {
         // Remove to allow negative points (penalty points?)
         if (points < 0)
         {
             return false;
         }
 
+        var platform = GetPlatformTriggeringAction();
+        if (platform == null)
+        {
+            return false;
+        }
+
         switch (platform)
         {
-            case "twitch":
+            case TWITCH:
                 return SetPointsTwitch(points);
-            case "youtube":
+            case YOUTUBE:
                 return SetPointsYouTube(points);
-            case "trovo":
+            case TROVO:
                 return SetPointsTrovo(points);
             default:
                 return false;
@@ -126,48 +162,28 @@ public class CPHInline
     public bool AddPoints()
     {
         if (!CPH.TryGetArg(INPUT_0, out long points))
-    	  {
-    		    return false;
-    	  }
+    	{
+    	    return false;
+    	}
 
-        return AddPoints(points, GetPlatformTriggeringAction());
-    }
+        var platform = GetPlatformTriggeringAction();
+        if (platform == null)
+        {
+            return false;
+        }
 
-    private bool AddPoints(long points, string platform)
-    {
         switch (platform)
         {
-            case "twitch":
+            case TWITCH:
                 return AddPointsTwitch(points);
-            case "youtube":
+            case YOUTUBE:
                 return AddPointsYouTube(points);
-            case "trovo":
+            case TROVO:
                 return AddPointsTrovo(points);
             default:
                 return false;
         }
     }
-
-    // public bool AddChatPoints()
-    // {
-    //     if (!CPH.TryGetArg("userName", out string userName))
-    //     {
-    //         return false;
-    //     }
-    //
-    //     var platform = GetPlatformTriggeringAction();
-    //     switch (platform)
-    //     {
-    //         case "twitch":
-    //             return AddPointsTwitch(CHAT_INCREMENT_POINTS, userName);
-    //         case "youtube":
-    //             return AddPointsYouTube(CHAT_INCREMENT_POINTS, userName);
-    //         case "trovo":
-    //             return AddPointsTrovo(CHAT_INCREMENT_POINTS, userName);
-    //         default:
-    //             return false;
-    //     }
-    // }
 
 #region Twitch
     private void SetTwitchUserPointsById(string userId, long points)
@@ -477,14 +493,14 @@ public class CPHInline
         string userId;
         if (live)
         {
-			      for (int i = 0; i < users.Count; i++)
+			for (int i = 0; i < users.Count; i++)
             {
                 userId = users[i]["id"].ToString();
 
-                points = GetUserPoints(userId, platform);
+                points = GetUserPoints(platform, userId);
                 if (points != null)
                 {
-                    SetUserPoints(userId, platform, points.Value + pointsToAdd);
+                    SetUserPoints(platform, userId, points.Value + pointsToAdd);
                 }
             }
         }
@@ -493,46 +509,15 @@ public class CPHInline
         return true;
     }
     
-    private long? GetUserPoints(string userId, string platform)
-    {
-        switch (platform)
-        {
-            case "twitch":
-                return GetTwitchUserPointsById(userId) ?? 0;
-            case "youtube":
-                return GetYouTubeUserPointsById(userId) ?? 0;
-            case "trovo":
-                return GetTrovoUserPointsById(userId) ?? 0;
-            default:
-                return null;
-        }
-    }
-    
-    private void SetUserPoints(string userId, string platform, long points)
-    {
-        switch (platform)
-        {
-            case "twitch":
-                SetTwitchUserPointsById(userId, points);
-                break;
-            case "youtube":
-                SetYouTubeUserPointsById(userId, points);
-                break;
-            case "trovo":
-                SetTrovoUserPointsById(userId, points);
-                break;
-        }
-    }
-
     public bool SendPlatformMessage()
     {
-        var platform = GetPlatformTriggeringAction();
-        if (platform == null)
+        if (!CPH.TryGetArg("message", out string message))
         {
             return false;
         }
 
-        if (!CPH.TryGetArg("message", out string message))
+        var platform = GetPlatformTriggeringAction();
+        if (platform == null)
         {
             return false;
         }
@@ -549,13 +534,13 @@ public class CPHInline
     {
         switch (platform)
         {
-            case "twitch":
+            case TWITCH:
                 CPH.SendMessage(message, bot);
                 return true;
-            case "youtube":
+            case YOUTUBE:
                 CPH.SendYouTubeMessageToLatestMonitored(message, bot);
                 return true;
-            case "trovo":
+            case TROVO:
                 CPH.SendTrovoMessage(message, bot);
                 return true;
         }
@@ -566,10 +551,10 @@ public class CPHInline
     public bool GetYouTubeTarget()
     {
         // make sure the first arg is a number
-    	  if (!CPH.TryGetArg(INPUT_0, out long input0))
-    	  {
-    		    return false;
-    	  }
+    	if (!CPH.TryGetArg(INPUT_0, out long input0))
+    	{
+    	    return false;
+    	}
 
         //This is pulling in the Info Given
         CPH.TryGetArg("rawInput", out string rawInput);
@@ -642,20 +627,20 @@ public class CPHInline
             return false;
         }
 
-        var isBotAccount = IsBotAccount(GetPlatformTriggeringAction(), userName);
+        var isBotAccount = IsBotAccount(userName);
         CPH.SetArgument("isBotAccount", isBotAccount);
         return true;
     }
 
-    private bool IsBotAccount(string platform, string username)
+    private bool IsBotAccount(string username)
     {
-        switch (platform)
+        switch (GetPlatformTriggeringAction())
         {
-            case "twitch":
+            case TWITCH:
                 return StringComparer.OrdinalIgnoreCase.Equals(username, "teamventuregaming");
-            case "youtube":
+            case YOUTUBE:
                 return StringComparer.OrdinalIgnoreCase.Equals(username, "Team Venture Bot");
-            case "trovo":
+            case TROVO:
                 return false; // TODO: Add Trovo bot username
         }
 
@@ -675,7 +660,7 @@ public class CPHInline
             return false;
         }
 
-        long? userPoints = GetUserPoints(userId, platform);
+        long? userPoints = GetUserPoints(platform, userId);
         if (userPoints == null)
         {
             return false;
@@ -727,7 +712,7 @@ public class CPHInline
             return false;
         }
 
-        SetUserPoints(userId, platform, userPoints.Value - SMASH_REDEEM_COST);
+        SetUserPoints(platform, userId, userPoints.Value - SMASH_REDEEM_COST);
 
         return RedeemSmash(action);
     }
@@ -752,7 +737,7 @@ public class CPHInline
             return false;
         }
 
-        long? userPoints = GetUserPoints(userId, platform);
+        long? userPoints = GetUserPoints(platform, userId);
         if (userPoints == null)
         {
             return false;
@@ -788,8 +773,8 @@ public class CPHInline
         if (!actionLookup.TryGetValue(songName, out string action))
         {
             var songTriggerList = string.Join(", ", actionLookup.Keys);
-            var howToUseSong = $"!song by itself picks a random song or you can specify one of these: {songTriggerList}.";
-            SendPlatformMessage(platform, howToUseSong, bot);
+            SendPlatformMessage(platform, "!song by itself picks a random clip.", bot);
+            SendPlatformMessage(platform, $"You can also specify one of these: {songTriggerList}.", bot);
             return true;
         }
 
@@ -799,7 +784,7 @@ public class CPHInline
             return false;
         }
 
-        SetUserPoints(userId, platform, userPoints.Value - SONG_REDEEM_COST);
+        SetUserPoints(platform, userId, userPoints.Value - SONG_REDEEM_COST);
 
         return RedeemSong(action);
     }
