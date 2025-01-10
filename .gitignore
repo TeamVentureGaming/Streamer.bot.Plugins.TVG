@@ -1,0 +1,9 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs
+/Streamer.bot.Plugins.TVG/.vs
+/Streamer.bot.Plugins.TVG/libs
+/Streamer.bot.Plugins.TVG/**/bin
+/Streamer.bot.Plugins.TVG/**/obj
