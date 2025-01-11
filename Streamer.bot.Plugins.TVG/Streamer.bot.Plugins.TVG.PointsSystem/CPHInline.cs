@@ -358,6 +358,9 @@ public class PointsSystem
     public bool TryRedeem(string redeemName, long redeemCost, Dictionary<string, string> actionLookup)
         => TryRedeem(this.CPH, this.PointsVariableName, redeemName, redeemCost, actionLookup);
 
+    public bool TryRedeem(string redeemName, Dictionary<string, (long actionCost, string actionName)> actionLookup)
+        => TryRedeem(this.CPH, this.PointsVariableName, redeemName, actionLookup);
+
     public static long? GetUserPoints(Streamer.bot.Plugin.Interface.IInlineInvokeProxy CPH, string pointsVariableName, string platform, string userId)
     {
         switch (platform)
@@ -594,10 +597,12 @@ public class PointsSystem
             CPH.LogInfo($"No user name found, using {userName} as default.");
         }
 
-        if (!CPH.TryGetArg(Constants.INPUT_0, out string actionKey))
+        if (!CPH.TryGetArg(Constants.INPUT_0, out string actionKey) || String.IsNullOrWhiteSpace(actionKey))
         {
             if (userPoints < redeemCost)
             {
+                // check if the redeemer is a mod and allow it anyway
+
                 PlatformExtensions.SendPlatformMessage(CPH, platform, $"{userName}, {redeemName} requires {redeemCost}, but you only have {userPoints}.");
                 return false;
             }
@@ -632,6 +637,8 @@ public class PointsSystem
 
         if (userPoints < redeemCost)
         {
+            // check if the redeemer is a mod and allow it anyway
+
             PlatformExtensions.SendPlatformMessage(CPH, platform, $"{userName}, {redeemName} requires {redeemCost}, but you only have {userPoints}.");
             return false;
         }
@@ -640,6 +647,86 @@ public class PointsSystem
 
         CPH.SetArgument("redeemActionName", action.Name);
         return CPH.RunAction(action.Name, false);
+    }
+
+    public static bool TryRedeem(Streamer.bot.Plugin.Interface.IInlineInvokeProxy CPH, string pointsVariableName, string redeemName, Dictionary<string, (long actionCost, string actionName)> actionLookup)
+    {
+        if (!CPH.TryGetUserId(out string userId))
+        {
+            CPH.LogError("No user ID found.");
+            return false;
+        }
+
+        var platform = PlatformExtensions.GetPlatformTriggeringAction(CPH);
+        if (platform == null)
+        {
+            CPH.LogError("No platform found.");
+            return false;
+        }
+
+        long? userPoints = GetUserPoints(CPH, pointsVariableName, platform, userId);
+        if (userPoints == null)
+        {
+            // TODO: could default points to 0
+            CPH.LogError("No user points found.");
+            return false;
+        }
+
+        var actionsByName = CPH.GetActions().ToDictionary(x => x.Name);
+        var actionsByKey = actionLookup.Select(x =>
+        {
+            actionsByName.TryGetValue(x.Value.actionName, out var action);
+            return (x.Key, x.Value.actionCost, action);
+        }).ToDictionary(x => x.Key, x => (x.actionCost, x.action), actionLookup.Comparer);
+        var enabledActionsByKey = actionsByKey.Where(x => x.Value.action?.Enabled ?? false).ToDictionary(x => x.Key, x => x.Value, actionLookup.Comparer);
+        if (enabledActionsByKey.Count == 0)
+        {
+            CPH.LogWarn($"User tried to execute {redeemName}, but not of the actions were enabled.");
+            PlatformExtensions.SendPlatformMessage(CPH, platform, $"{redeemName} currently has no enabled actions!");
+            return false;
+        }
+
+        if (!CPH.TryGetArg(Constants.USER_NAME, out string userName))
+        {
+            userName = UKNOWN_REDEEMER_USER_NAME;
+            CPH.LogInfo($"No user name found, using {userName} as default.");
+        }
+
+        if (!CPH.TryGetArg(Constants.INPUT_0, out string actionKey) || String.IsNullOrWhiteSpace(actionKey))
+        {
+            CPH.LogInfo($"Redeem action not specified.  Not running redeem.");
+            return false;
+        }
+
+        if (!actionsByKey.TryGetValue(actionKey, out var action))
+        {
+            // TODO: may need to split this list into multiple messages
+            var activeKeyList = string.Join(", ", actionsByKey.Where(x => x.Value.action?.Enabled ?? false).Select(x => x.Key));
+            PlatformExtensions.SendPlatformMessage(CPH, platform, $"{redeemName} can be used with one of these: {activeKeyList}.");
+            return false;
+        }
+
+        if (action.action?.Enabled != true)
+        {
+            // TODO: may need to split this list into multiple messages
+            var activeKeyList = string.Join(", ", actionsByKey.Where(x => x.Value.action?.Enabled ?? false).Select(x => x.Key));
+            PlatformExtensions.SendPlatformMessage(CPH, platform, $"{actionKey} is not currently active. Try one of these instead: {activeKeyList}.");
+            return false;
+        }
+
+        var redeemCost = action.actionCost;
+        if (userPoints < redeemCost)
+        {
+            // check if the redeemer is a mod and allow it anyway
+
+            PlatformExtensions.SendPlatformMessage(CPH, platform, $"{userName}, {redeemName} requires {redeemCost}, but you only have {userPoints}.");
+            return false;
+        }
+
+        SetUserPoints(CPH, pointsVariableName, platform, userId, userPoints.Value - redeemCost);
+
+        CPH.SetArgument("redeemActionName", action.action.Name);
+        return CPH.RunAction(action.action.Name, false);
     }
 
     #region Twitch
@@ -947,38 +1034,75 @@ public class CPHInline
 {
     private static readonly Streamer.bot.Plugin.Interface.IInlineInvokeProxy CPH; // TODO: make sure to remove / comment this line before copying into Streamer.bot
 
-    private readonly Lazy<PointsSystem> tvgAudioPointsLazy;
-    private PointsSystem tvgAudioPoints => tvgAudioPointsLazy.Value;
+    // Venture points are for fun redeems that should be readily accessible to viewers
+    private readonly Lazy<PointsSystem> tvgVenturePointsLazy;
+    private PointsSystem tvgVenturePoints => tvgVenturePointsLazy.Value;
+
+    // Play Points (PP) are for 7 Days to Die redeems that we want to be more limited potentially
+    private readonly Lazy<PointsSystem> tvgPlayPointsLazy;
+    private PointsSystem tvgPlayPoints => tvgPlayPointsLazy.Value;
 
     public CPHInline()
     {
-        this.tvgAudioPointsLazy = new Lazy<PointsSystem>(() => new PointsSystem(CPH, "points"));
+        this.tvgVenturePointsLazy = new Lazy<PointsSystem>(() => new PointsSystem(CPH, "vp"));
+        this.tvgPlayPointsLazy = new Lazy<PointsSystem>(() => new PointsSystem(CPH, "pp"));
     }
 
-    public bool SendUserPointsMessage()
+    public bool SendPlatformMessage()
     {
-        return this.tvgAudioPoints.SendUserPointsMessage((userName, userPoints) => $"{userName}, you have {userPoints} points!  Use !commands to see how to spend them!");
+        return PlatformExtensions.SendPlatformMessage(CPH);
     }
 
-    public bool SetPoints()
+    public bool SendUserCommandsMessage()
     {
-        return this.tvgAudioPoints.SetPoints();
+        return PlatformExtensions.SendPlatformMessage(CPH, "Use !commandsvp to spend venture points and use !commandspp to spend your pp.");
     }
 
-    public bool AddPoints()
+    public bool SendUserVenturePointsMessage()
     {
-        return this.tvgAudioPoints.AddPoints();
+        return this.tvgVenturePoints.SendUserPointsMessage((userName, userPoints) => $"{userName}, you have {userPoints} venture points!  Use !commandsvp to see how to spend them!");
     }
 
-    public bool ResetAllUserPoints()
+    public bool SetVenturePoints()
     {
-        this.tvgAudioPoints.ClearPointsForAllPlatforms();
+        return this.tvgVenturePoints.SetPoints();
+    }
+
+    public bool AddVenturePoints()
+    {
+        return this.tvgVenturePoints.AddPoints();
+    }
+
+    public bool ResetAllUserVenturePoints()
+    {
+        this.tvgVenturePoints.ClearPointsForAllPlatforms();
+        return true;
+    }
+
+    public bool SendUserPlayPointsMessage()
+    {
+        return this.tvgPlayPoints.SendUserPointsMessage((userName, userPoints) => $"{userName}, you have {userPoints} play points!  Use !commandspp to see how to spend them!");
+    }
+
+    public bool SetPlayPoints()
+    {
+        return this.tvgPlayPoints.SetPoints();
+    }
+
+    public bool AddPlayPoints()
+    {
+        return this.tvgPlayPoints.AddPoints();
+    }
+
+    public bool ResetAllUserPlayPoints()
+    {
+        this.tvgPlayPoints.ClearPointsForAllPlatforms();
         return true;
     }
 
     private static long DEFAULT_POINTS_PER_TICK = 10; // CHANGE THIS TO SET THE AMOUNT OF POINTS ADDED PER PRESENT VIEWER SWEEP
     private static readonly string POINTS_PER_TICK_VARIABLE_NAME = "pointsGivenPerTick";
-    public bool AddWatchPoints()
+    public bool AddWatchVenturePoints()
     {
         if (!CPH.TryGetArg("isLive", out bool live))
         {
@@ -1025,7 +1149,61 @@ public class CPHInline
                 CPH.LogError("Could not determine user id from users object.");
                 continue;
             }
-            this.tvgAudioPoints.AddUserPoints(platform, userId, pointsToAdd);
+            this.tvgVenturePoints.AddUserPoints(platform, userId, pointsToAdd);
+        }
+
+        CPH.LogInfo($"Ended Present Viewers from {platform}");
+        return true;
+    }
+
+    public bool AddWatchPlayPoints()
+    {
+        if (!CPH.TryGetArg("isLive", out bool live))
+        {
+            CPH.LogError("isLive not set.  Not adding watch points.");
+            return false;
+        }
+
+        if (!live)
+        {
+            CPH.LogInfo("Stream is not live.  Not adding watch points.");
+            return true;
+        }
+
+        if (!CPH.TryGetArg(Constants.EVENT_SOURCE, out string platform))
+        {
+            CPH.LogError("Unable to determine platform.  Not adding watch points.");
+            return false;
+        }
+
+        if (!CPH.TryGetArg("users", out List<Dictionary<string, object>> users))
+        {
+            CPH.LogError("Unable to get Users from arguments.");
+            return false;
+        }
+
+        if (!CPH.TryGetArg(POINTS_PER_TICK_VARIABLE_NAME, out long pointsToAdd))
+        {
+            pointsToAdd = DEFAULT_POINTS_PER_TICK;
+            CPH.LogWarn($"Using default points per tick value {pointsToAdd}");
+        }
+        else
+        {
+            CPH.LogInfo($"Using points per tick specified as {pointsToAdd}");
+        }
+
+        CPH.LogInfo($"Starting Present Viewers from {platform} with {users.Count} users.");
+
+        string? userId;
+        for (int i = 0; i < users.Count; i++)
+        {
+            userId = users[i]?["id"]?.ToString();
+            if (userId == null)
+            {
+                CPH.LogError("Could not determine user id from users object.");
+                continue;
+            }
+            this.tvgPlayPoints.AddUserPoints(platform, userId, pointsToAdd);
         }
 
         CPH.LogInfo($"Ended Present Viewers from {platform}");
@@ -1034,7 +1212,7 @@ public class CPHInline
 
     private static long DEFAULT_POINTS_TO_GIVE = 10; // CHANGE THIS TO SET THE AMOUNT OF POINTS ADDED TO TRIGGERING USERS BY DEFAULT
     private static readonly string POINTS_TO_GIVE_VARIABLE_NAME = "pointsToGive";
-    public bool AddPointsToTriggeringUserId()
+    public bool AddVenturePointsToTriggeringUserId()
     {
         if (!CPH.TryGetArg(POINTS_TO_GIVE_VARIABLE_NAME, out long pointsToAdd))
         {
@@ -1046,23 +1224,30 @@ public class CPHInline
             CPH.LogInfo($"Using points to give specified as {pointsToAdd}");
         }
 
-        return this.tvgAudioPoints.AddPointsToTriggeringUserId(pointsToAdd);
+        return this.tvgVenturePoints.AddPointsToTriggeringUserId(pointsToAdd);
     }
 
-    public bool FirstWords()
+    public bool AddPlayPointsToTriggeringUserId()
     {
-        return this.tvgAudioPoints.AddPointsToTriggeringUserId(300);
-    }
+        if (!CPH.TryGetArg(POINTS_TO_GIVE_VARIABLE_NAME, out long pointsToAdd))
+        {
+            pointsToAdd = DEFAULT_POINTS_TO_GIVE;
+            CPH.LogWarn($"Using default points to give value {pointsToAdd}");
+        }
+        else
+        {
+            CPH.LogInfo($"Using points to give specified as {pointsToAdd}");
+        }
 
-    public bool Chatting()
-    {
-        return this.tvgAudioPoints.AddPointsToTriggeringUserId(10);
+        return this.tvgPlayPoints.AddPointsToTriggeringUserId(pointsToAdd);
     }
 
     public bool SetIsBotAccount()
     {
         var isBotAccount = PlatformExtensions.IsBotAccount(CPH);
-        CPH.SetArgument("isBotAccount", isBotAccount);
+        var variableName = "isBotAccount";
+        CPH.LogInfo($"Setting variable {variableName} to {isBotAccount}");
+        CPH.SetArgument(variableName, isBotAccount);
         return true;
     }
 
@@ -1092,7 +1277,7 @@ public class CPHInline
             return false;
         }
 
-        return this.tvgAudioPoints.TryRedeem(command, 50, smashActionLookup);
+        return this.tvgVenturePoints.TryRedeem(command, 50, smashActionLookup);
     }
 #endregion
 
@@ -1117,9 +1302,143 @@ public class CPHInline
             return false;
         }
 
-        return this.tvgAudioPoints.TryRedeem(command, 250, songActionLookup);
+        return this.tvgVenturePoints.TryRedeem(command, 250, songActionLookup);
+    }
+    #endregion
+
+#region MMGA
+
+#region Song
+    private static Dictionary<string, string> mmgaSongActionLookup = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "backbone",      "[Song Bite MMGA] - Backbone" },
+        { "brewfreedom",   "[Song Bite MMGA] - Brewing Freedom" },
+        { "campfirebanjo", "[Song Bite MMGA] - Camp Fire Banjo" },
+        { "dualkings",     "[Song Bite MMGA] - Dual Kings" },
+        { "fallennation",  "[Song Bite MMGA] - Fallen Nation" },
+        { "mmgabanjo",     "[Song Bite MMGA] - MMGA Banjo" },
+        { "readytogo",     "[Song Bite MMGA] - Ready To Go" },
+        { "shotgunWatch",  "[Song Bite MMGA] - Shotgun Watch" }
+    };
+
+    public bool RedeemSongMMGA()
+    {
+        if (!CPH.TryGetArg(Constants.COMMAND, out string command))
+        {
+            return false;
+        }
+
+        return this.tvgVenturePoints.TryRedeem(command, 250, mmgaSongActionLookup);
+    }
+    #endregion
+
+#region Clip
+    private static Dictionary<string, string> mmgaClipActionLookup = new (StringComparer.OrdinalIgnoreCase)
+    {
+        { "bestpres",      "[MMGA Clip] - Best President" },
+        { "biggestahole",  "[MMGA Clip] - Biggest AHole" },
+        { "fixedfence",    "[MMGA Clip] - Fixed The Fence" },
+        { "oops",          "[MMGA Clip] - Oops" },
+        { "ungrateful",    "[MMGA Clip] - Ungrateful Jen" }
+    };
+
+    public bool RedeemClipMMGA()
+    {
+        if (!CPH.TryGetArg(Constants.COMMAND, out string command))
+        {
+            return false;
+        }
+
+        return this.tvgVenturePoints.TryRedeem(command, 250, mmgaClipActionLookup);
     }
 #endregion
 
 #endregion
+
+#region SilenTVentures
+
+#region Song
+    private static Dictionary<string, string> silentSongActionLookup = new (StringComparer.OrdinalIgnoreCase)
+    {
+        { "ghosthonor", "[Song Bite SilenTVenture] - Ghost Honor" },
+        { "grandduo",   "[Song Bite SilenTVenture] - Grand Duo" },
+        { "queenmoon",  "[Song Bite SilenTVenture] - Queen Moonlight" },
+        { "tvstrong",   "[Song Bite SilenTVenture] - TV Strong & Bold" }
+    };
+
+    public bool RedeemSongSilent()
+    {
+        if (!CPH.TryGetArg(Constants.COMMAND, out string command))
+        {
+            return false;
+        }
+
+        return this.tvgVenturePoints.TryRedeem(command, 250, silentSongActionLookup);
+    }
+#endregion
+
+#region Clip
+
+#endregion
+
+#endregion
+
+#region CCJ
+#region Song
+    private static Dictionary<string, string> crabSongActionLookup = new (StringComparer.OrdinalIgnoreCase)
+    {
+        { "crabjest",     "[Song Bite CCJ] - Crab Jest" },
+        { "crabjestlong", "[Song Bite CCJ] - Crab Jest Long" },
+        { "crabshoes",    "[Song Bite CCJ] - Crab Shoes" },
+        { "jimmytrick",   "[Song Bite CCJ] - Jimmy Trick" },
+        { "jugglehope",   "[Song Bite CCJ] - Juggle Hope" },
+        { "makeit",       "[Song Bite CCJ] - Make It Through The Night" },
+        { "pavcommands",  "[Song Bite CCJ] - Pav Commands" },
+        { "towerdoom",    "[Song Bite CCJ] - Tower Doom Short" },
+        { "welcomesight", "[Song Bite CCJ] - Welcome Sight" }
+    };
+
+    public bool RedeemSongCCJ()
+    {
+        if (!CPH.TryGetArg(Constants.COMMAND, out string command))
+        {
+            return false;
+        }
+
+        return this.tvgVenturePoints.TryRedeem(command, 250, crabSongActionLookup);
+    }
+    #endregion
+
+    #region Clip
+
+    #endregion
+    #endregion
+
+#endregion
+
+    #region Play Points
+    #region Spawns
+    private static readonly Dictionary<string, (long amount, string actionName)> spawnActionLookup = new (StringComparer.OrdinalIgnoreCase)
+    {
+        { "cop",     (100 ,"[7DTD Spawn] - Cop") },
+        { "mama",    (75  ,"[7DTD Spawn] - Mama") },
+        { "pete",    (50  ,"[7DTD Spawn] - Skinny Pete") },
+        { "kenny",   (50  ,"[7DTD Spawn] - Kenny") },
+        { "wight",   (150 ,"[7DTD Spawn] - Wight") },
+        { "spider",  (100 ,"[7DTD Spawn] - Spider") },
+        { "burnt",   (50  ,"[7DTD Spawn] - Burnt") },
+        { "soldier", (100 ,"[7DTD Spawn] - Soldier") }
+    };
+
+    public bool RedeemSpawn()
+    {
+        if (!CPH.TryGetArg(Constants.COMMAND, out string command))
+        {
+            return false;
+        }
+
+        return this.tvgPlayPoints.TryRedeem(command, spawnActionLookup);
+    }
+    #endregion
+    #endregion
 }
