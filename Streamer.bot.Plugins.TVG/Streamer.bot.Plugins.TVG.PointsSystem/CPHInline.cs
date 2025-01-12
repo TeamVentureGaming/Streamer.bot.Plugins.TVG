@@ -1309,7 +1309,7 @@ public class CPHInline
 #region MMGA
 
 #region Song
-    private static Dictionary<string, string> mmgaSongActionLookup = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> mmgaSongActionLookup = new(StringComparer.OrdinalIgnoreCase)
     {
         { "backbone",      "[Song Bite MMGA] - Backbone" },
         { "brewfreedom",   "[Song Bite MMGA] - Brewing Freedom" },
@@ -1333,7 +1333,7 @@ public class CPHInline
     #endregion
 
 #region Clip
-    private static Dictionary<string, string> mmgaClipActionLookup = new (StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> mmgaClipActionLookup = new (StringComparer.OrdinalIgnoreCase)
     {
         { "bestpres",      "[MMGA Clip] - Best President" },
         { "biggestahole",  "[MMGA Clip] - Biggest AHole" },
@@ -1358,7 +1358,7 @@ public class CPHInline
 #region SilenTVentures
 
 #region Song
-    private static Dictionary<string, string> silentSongActionLookup = new (StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> silentSongActionLookup = new (StringComparer.OrdinalIgnoreCase)
     {
         { "ghosthonor", "[Song Bite SilenTVenture] - Ghost Honor" },
         { "grandduo",   "[Song Bite SilenTVenture] - Grand Duo" },
@@ -1385,7 +1385,7 @@ public class CPHInline
 
 #region CCJ
 #region Song
-    private static Dictionary<string, string> crabSongActionLookup = new (StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> crabSongActionLookup = new (StringComparer.OrdinalIgnoreCase)
     {
         { "crabjest",     "[Song Bite CCJ] - Crab Jest" },
         { "crabjestlong", "[Song Bite CCJ] - Crab Jest Long" },
@@ -1407,17 +1407,17 @@ public class CPHInline
 
         return this.tvgVenturePoints.TryRedeem(command, 250, crabSongActionLookup);
     }
-    #endregion
+#endregion
 
-    #region Clip
+#region Clip
 
-    #endregion
-    #endregion
+#endregion
+#endregion
 
 #endregion
 
-    #region Play Points
-    #region Spawns
+#region Play Points
+#region Spawns
     private static readonly Dictionary<string, (long amount, string actionName)> spawnActionLookup = new (StringComparer.OrdinalIgnoreCase)
     {
         { "cop",     (100 ,"[7DTD Spawn] - Cop") },
@@ -1439,6 +1439,6 @@ public class CPHInline
 
         return this.tvgPlayPoints.TryRedeem(command, spawnActionLookup);
     }
-    #endregion
-    #endregion
+#endregion
+#endregion
 }
