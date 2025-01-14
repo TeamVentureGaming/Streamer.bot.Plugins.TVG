@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net48;net9.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Streamer.bot.Plugin.Interface">
+      <HintPath>..\libs\Streamer.bot.Plugin.Interface.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
