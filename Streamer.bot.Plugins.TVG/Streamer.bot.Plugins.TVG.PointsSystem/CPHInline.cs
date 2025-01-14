@@ -1879,6 +1879,12 @@ public class CPHInline
 
         if (!CPH.TryGetArg(Constants.INPUT_0, out string spawnKey) || !spawnActionLookup.TryGetValue(spawnKey, out var settings))
         {
+            if (!CPH.TryGetArg(Constants.COMMAND, out string command))
+            {
+                command = "spawn";
+            }
+
+            PlatformExtensions.SendPlatformMessage(CPH, platform, $"{command} can be used with {String.Join(", ", spawnActionLookup.Select(x => $"{x.Key} ({x.Value.amount})"))}");
             return false;
         }
 
@@ -1924,8 +1930,10 @@ public class CPHInline
 
         return true;
     }
+#endregion
 
-    private static readonly Dictionary<string, (long amount, int entityId, int range)> supplyActionLookup = new(StringComparer.OrdinalIgnoreCase)
+#region Supplies
+    private static readonly Dictionary<string, (long amount, int entityId, int range)> supplyActionLookup = new (StringComparer.OrdinalIgnoreCase)
     {
         { "weapon",      (100, 129, 4)},
         { "tool",        (100, 133, 3)},
@@ -1969,6 +1977,12 @@ public class CPHInline
 
         if (!CPH.TryGetArg(Constants.INPUT_0, out string supplyKey) || !supplyActionLookup.TryGetValue(supplyKey, out var settings))
         {
+            if (!CPH.TryGetArg(Constants.COMMAND, out string command))
+            {
+                command = "supply";
+            }
+
+            PlatformExtensions.SendPlatformMessage(CPH, platform, $"{command} can be used with {String.Join(", ", supplyActionLookup.Select(x => $"{x.Key} ({x.Value.amount})"))}");
             return false;
         }
 
