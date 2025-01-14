@@ -1815,7 +1815,212 @@ public class CPHInline
 
 #region Play Points
 
+    private static readonly Uri GameServerCommandUri = new ("http://localhost:9000/api/command", UriKind.Absolute);
 
+#region Spawns
+    private static readonly Dictionary<string, (long amount, int entityId)> spawnActionLookup = new (StringComparer.OrdinalIgnoreCase)
+    {
+        { "arlene",         (50 , 1  )},
+        { "arleneferal",    (75 , 2  )},
+        { "arlenerad",      (100, 3  )},
+        { "marlene",        (50 , 4  )},
+        { "marleneferal",   (75 , 5  )},
+        { "marlenerad",     (100, 6  )},
+        { "partygirl",      (50 , 7  )},
+        { "partygirlferal", (75 , 8  )},
+        { "partygirlrad",   (100, 9  )},
+        { "burnt",          (50 , 25 )},
+        { "burntferal",     (75 , 26 )},
+        { "burntrad",       (100, 27 )},
+        { "spider",         (100, 28 )},
+        { "spiderferal",    (150, 29 )},
+        { "spiderrad",      (200, 30 )},
+        { "biker",          (100, 58 )},
+        { "bikerferal",     (150, 59 )},
+        { "bikerrad",       (200, 60 )},
+        { "mama",           (75 , 64 )},
+        { "mamaferal",      (100, 65 )},
+        { "mamarad",        (125, 66 )},
+        { "cop",            (100, 73 )},
+        { "copferal",       (150, 74 )},
+        { "coprad",         (200, 75 )},
+        { "soldier",        (100, 79 )},
+        { "soldierferal",   (150, 80 )},
+        { "soldierrad",     (200, 81 )},
+        { "wightferal",     (250, 82 )},
+        { "wightrad",       (300, 83 )},
+        { "screamer",       (200, 84 )},
+        { "screamerferal",  (250, 85 )},
+        { "screamerrad",    (300, 86 )},
+        { "mutant",         (200, 87 )},
+        { "mutantferal",    (250, 88 )},
+        { "mutantrad",      (300, 89 )},
+        { "demo",           (300, 90 )},
+        { "bear",           (200, 97 )},
+        { "bearsmall",      (150, 98 )},
+        { "bearzombie",     (300, 99 )},
+        { "direwolf",       (300, 101)}
+    };
+
+    public bool RedeemSpawn()
+    {
+        if (!CPH.TryGetUserId(out var userId))
+        {
+            return false;
+        }
+
+        var platform = CPH.GetPlatformTriggeringAction();
+        if (platform == null)
+        {
+            return false;
+        }
+
+        var points = this.tvgPlayPoints.GetUserPoints(platform, userId) ?? 0;
+
+        if (!CPH.TryGetArg(Constants.INPUT_0, out string spawnKey) || !spawnActionLookup.TryGetValue(spawnKey, out var settings))
+        {
+            return false;
+        }
+
+        if (points < settings.amount)
+        {
+            return false;
+        }
+
+        if (!CPH.TryGetArg(Constants.INPUT_1, out string targetPlayer)) // TODO: this may need to be raw with 
+        {
+            targetPlayer = "0";
+        }
+
+        var commandString = $"se {targetPlayer} {settings.entityId}";
+        //if (CPH.TryGetArg(Constants.INPUT_2, out int count))
+        //{
+        //    if (count > 0 && count < 100)
+        //    {
+        //        commandString += " " + count.ToString();
+        //    }
+        //}
+        var req = System.Net.HttpWebRequest.CreateHttp(GameServerCommandUri);
+        req.Method = "POST";
+        req.ContentType = "text/plain";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(commandString);
+        req.ContentLength = bytes.Length;
+        using (var stream = req.GetRequestStream())
+        {
+            stream.Write(bytes, 0, bytes.Length);
+        }
+        var response = (System.Net.HttpWebResponse)req.GetResponse();
+        if (response.StatusCode != System.Net.HttpStatusCode.OK)
+        {
+            return false;
+        }
+
+        using (var stream = new System.IO.StreamReader(response.GetResponseStream()))
+        {
+            var responseString = stream.ReadToEnd();
+        }
+
+        this.tvgPlayPoints.SetUserPoints(platform, userId, points - settings.amount);
+
+        return true;
+    }
+
+    private static readonly Dictionary<string, (long amount, int entityId, int range)> supplyActionLookup = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "weapon",      (100, 129, 4)},
+        { "tool",        (100, 133, 3)},
+        { "medicine",    (100, 136, 3)},
+        { "resource",    (100, 139, 4)},
+        { "builder",     (100, 143, 3)},
+        { "farming",     (100, 146, 2)},
+        { "ammo",        (100, 148, 4)},
+        { "specialammo", (200, 152, 2)},
+        { "books",       (100, 154, 3)},
+        { "utility",     (100, 157, 2)},
+        { "candy",       (150, 159, 1)},
+        { "treasure",    (200, 160, 1)},
+        { "armor",       (100, 161, 3)},
+        { "food",        (100, 164, 4)},
+        { "bike",        (100, 168, 1)},
+        { "minibike",    (100, 169, 1)},
+        { "motorcycle",  (100, 170, 1)},
+        { "4x4",         (150, 171, 1)},
+        { "gyro",        (200, 172, 1)},
+        { "explosives",  (100, 173, 4)},
+        { "robo",        (100, 177, 4)},
+        { "mods",        (100, 181, 3)},
+        { "electrical",  (100, 184, 2)}
+    };
+
+    public bool RedeemSupply()
+    {
+        if (!CPH.TryGetUserId(out var userId))
+        {
+            return false;
+        }
+
+        var platform = CPH.GetPlatformTriggeringAction();
+        if (platform == null)
+        {
+            return false;
+        }
+
+        var points = this.tvgPlayPoints.GetUserPoints(platform, userId) ?? 0;
+
+        if (!CPH.TryGetArg(Constants.INPUT_0, out string supplyKey) || !supplyActionLookup.TryGetValue(supplyKey, out var settings))
+        {
+            return false;
+        }
+
+        if (points < settings.amount)
+        {
+            return false;
+        }
+
+        if (!CPH.TryGetArg(Constants.INPUT_1, out string targetPlayer)) // TODO: this may need to be raw with 
+        {
+            targetPlayer = "0";
+        }
+
+        var entityId = settings.entityId;
+        if (settings.range > 1)
+        {
+            entityId += CPH.Between(0, settings.range - 1);
+        }
+
+        var commandString = $"se {targetPlayer} {entityId}";
+        //if (CPH.TryGetArg(Constants.INPUT_2, out int count))
+        //{
+        //    if (count > 0 && count < 100)
+        //    {
+        //        commandString += " " + count.ToString();
+        //    }
+        //}
+        var req = System.Net.HttpWebRequest.CreateHttp(GameServerCommandUri);
+        req.Method = "POST";
+        req.ContentType = "text/plain";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(commandString);
+        req.ContentLength = bytes.Length;
+        using (var stream = req.GetRequestStream())
+        {
+            stream.Write(bytes, 0, bytes.Length);
+        }
+        var response = (System.Net.HttpWebResponse)req.GetResponse();
+        if (response.StatusCode != System.Net.HttpStatusCode.OK)
+        {
+            return false;
+        }
+
+        using (var stream = new System.IO.StreamReader(response.GetResponseStream()))
+        {
+            var responseString = stream.ReadToEnd();
+        }
+
+        this.tvgPlayPoints.SetUserPoints(platform, userId, points - settings.amount);
+
+        return true;
+    }
+#endregion
 
 #endregion
 }
